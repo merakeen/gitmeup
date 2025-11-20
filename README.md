@@ -4,8 +4,6 @@
 It analyses your working tree using `git diff --stat`, `git status`, and a filtered `git diff`, then produces
 atomically grouped `git add` and `git commit` commands with strict path-quoting rules.
 
-This improves commit hygiene in large or fast-moving repositories while reducing cognitive overhead.
-
 ## Features
 
 - Extracts:
