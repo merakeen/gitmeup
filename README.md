@@ -50,7 +50,8 @@ export GEMINI_API_KEY="your-key"
 You also need a model with:
 
 ```bash
-GITMEUP_MODEL="a gemini model"
+export GITMEUP_MODEL="a gemini model"
+```
 
 ## Usage
 
