@@ -84,7 +84,9 @@ pip install -e .
 `gitmeup` interacts with Google Gemini via `google-genai`. It needs:
 
 * A Gemini API key
-* A model name (default is `gemini-2.0-flash-lite` unless overridden)
+* A model name (default is `gemini-2.5-flash-lite` unless overridden)
+
+Default rationale: this tool is text-first (`generate_content`), so we use a durable general Gemini 2.5 model instead of live-audio or image-specialized variants.
 
 ### 1. Secrets via env file (recommended)
 
@@ -100,7 +102,7 @@ Example global config:
 ```env
 # ~/.gitmeup.env
 GEMINI_API_KEY=your-gemini-key-here
-GITMEUP_MODEL=gemini-2.0-flash-lite
+GITMEUP_MODEL=gemini-2.5-flash-lite
 ```
 
 > Keep `~/.gitmeup.env` out of any git repo. It lives only in your home directory.
@@ -109,7 +111,7 @@ Optional per-repo overrides:
 
 ```env
 # ./.env (inside a project, usually without secrets if repo is shared)
-GITMEUP_MODEL=gemini-2.0-pro
+GITMEUP_MODEL=gemini-2.5-pro
 ```
 
 If you use a local `.env` with secrets, **ensure** `.env` is listed in that repo’s `.gitignore`.
@@ -120,7 +122,7 @@ You can also configure via plain env vars:
 
 ```bash
 export GEMINI_API_KEY="your-gemini-key"
-export GITMEUP_MODEL="gemini-2.0-flash-001"
+export GITMEUP_MODEL="gemini-2.5-flash"
 ```
 
 ### 3. CLI overrides (use sparingly)
@@ -128,7 +130,7 @@ export GITMEUP_MODEL="gemini-2.0-flash-001"
 The CLI accepts overrides:
 
 ```bash
-gitmeup --model gemini-2.0-pro        # override model for this run only
+gitmeup --model gemini-2.5-pro        # override model for this run only
 gitmeup --api-key "you-can-but-should-not-add-your-key-here"     # override key (not recommended; leaks to history!)
 ```
 
@@ -211,7 +213,7 @@ git log --oneline --graph --decorate -n 10
 Override the model for a specific run:
 
 ```bash
-gitmeup --model gemini-2.0-flash-lite
+gitmeup --model gemini-2.5-flash-lite
 ```
 
 ## Behaviour

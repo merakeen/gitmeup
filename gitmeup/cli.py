@@ -7,11 +7,14 @@ from textwrap import dedent
 from pathlib import Path
 
 from google import genai
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 # CONSTANT: Hard limit for diff size to prevent token exhaustion (429 errors).
 # ~4 characters per token. 40,000 chars is roughly 10k tokens, leaving plenty of room.
 MAX_DIFF_CHARS = 40000
+# Long-lived, general-purpose text model for this CLI workflow.
+# Live-audio and image-specialized models are intentionally not defaulted here.
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
 
 SYSTEM_PROMPT = dedent(
     """
@@ -73,10 +76,20 @@ def load_env() -> None:
     - ./.env in the current working directory (per-project overrides)
     - CLI --api-key and --model override everything.
     """
-    # Global secrets and defaults: ~/.gitmeup.env
-    load_dotenv(dotenv_path=Path.home() / ".gitmeup.env", override=False)
-    # Project local overrides: .env in the repo where gitmeup is run
-    load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
+    # Keep shell-exported values highest priority.
+    existing_keys = set(os.environ.keys())
+
+    # File precedence: ~/.gitmeup.env < ./.env
+    merged = {
+        **dotenv_values(Path.home() / ".gitmeup.env"),
+        **dotenv_values(Path.cwd() / ".env"),
+    }
+
+    # Apply only keys that weren't already set in the process environment.
+    for key, value in merged.items():
+        if value is None or key in existing_keys:
+            continue
+        os.environ[key] = value
 
 
 def run_git(args, check=True):
@@ -247,8 +260,8 @@ def main(argv=None):
     )
     parser.add_argument(
         "--model",
-        default=os.environ.get("GITMEUP_MODEL", "gemini-2.0-flash-lite"),
-        help="Gemini model name (default: gemini-2.0-flash-lite or $GITMEUP_MODEL).",
+        default=os.environ.get("GITMEUP_MODEL", DEFAULT_MODEL),
+        help=f"Gemini model name (default: {DEFAULT_MODEL} or $GITMEUP_MODEL).",
     )
     parser.add_argument(
         "--apply",
