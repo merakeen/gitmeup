@@ -137,6 +137,33 @@ gitmeup --api-key "you-can-but-should-not-add-your-key-here"     # override key 
 > [!WARNING]
 > For security, prefer `~/.gitmeup.env` or environment variables over `--api-key`.
 
+### 4. Typical dev local use
+
+Run this to use the fix in your installed CLI:
+
+```bash
+cd /home/you/gitmeup
+source .venv/bin/activate
+
+# reinstall updated code
+python -m pip install . --force-reinstall
+
+# verify resolved model from env loading
+python - <<'PY'
+import os
+import gitmeup.cli as c
+c.load_env()
+print("GITMEUP_MODEL =", os.environ.get("GITMEUP_MODEL"))
+PY
+
+# optional: check if global file still has old model
+grep -n '^GITMEUP_MODEL=' ~/.gitmeup.env .env 2>/dev/null || true
+
+# test run (explicit model once, to avoid any ambiguity)
+gitmeup --model gemini-2.5-flash-lite
+gitmeup --model gemini-2.5-flash-lite --apply
+```
+
 ## Usage
 
 Run the tool from the root of any git repository with uncommitted changes:
