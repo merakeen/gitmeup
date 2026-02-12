@@ -1,6 +1,6 @@
 [project]
 name = "gitmeup"
-version = "1.0.3"
+version = "1.0.4"
 description = "LLM-assisted conventional commits generator for git repositories. Automatically generates git add and commit lines based on git diff and status."
 readme = "README.md"
 requires-python = ">=3.10"

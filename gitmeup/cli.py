@@ -9,6 +9,8 @@ from pathlib import Path
 from google import genai
 from dotenv import dotenv_values
 
+from gitmeup import __version__
+
 # CONSTANT: Hard limit for diff size to prevent token exhaustion (429 errors).
 # ~4 characters per token. 40,000 chars is roughly 10k tokens, leaving plenty of room.
 MAX_DIFF_CHARS = 40000
@@ -219,11 +221,51 @@ def extract_bash_block(text):
 
 def parse_commands(block):
     commands = []
-    for raw in block.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        commands.append(shlex.split(line))
+    buffered_lines = []
+    start_line = None
+
+    for line_number, raw in enumerate(block.splitlines(), start=1):
+        # When we're not buffering, allow some light cleanup of common LLM artifacts.
+        if not buffered_lines:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("$ "):
+                line = line[2:].lstrip()
+        else:
+            # Preserve raw line breaks while waiting for a closing quote.
+            line = raw
+
+        if not buffered_lines:
+            buffered_lines = [line]
+            start_line = line_number
+        else:
+            buffered_lines.append(line)
+
+        candidate = "\n".join(buffered_lines)
+        try:
+            parsed = shlex.split(candidate)
+        except ValueError as exc:
+            if "No closing quotation" in str(exc):
+                continue
+            raise ValueError(
+                f"Invalid shell syntax near line {start_line}: {exc}"
+            ) from exc
+
+        if parsed:
+            commands.append(parsed)
+        buffered_lines = []
+        start_line = None
+
+    if buffered_lines:
+        snippet = " ".join(part.strip() for part in buffered_lines if part.strip())
+        raise ValueError(
+            f"Unterminated quoted string starting near line {start_line}: {snippet}"
+        )
+
+    if not commands:
+        raise ValueError("No executable commands found in bash block.")
+
     return commands
 
 
@@ -273,6 +315,12 @@ def main(argv=None):
         default=os.environ.get("GEMINI_API_KEY"),
         help="Gemini API key (default: $GEMINI_API_KEY).",
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show gitmeup version and exit.",
+    )
 
     args = parser.parse_args(argv)
 
@@ -308,7 +356,14 @@ def main(argv=None):
         print("Raw output:\n", raw_output)
         sys.exit(1)
 
-    commands = parse_commands(bash_block)
+    try:
+        commands = parse_commands(bash_block)
+    except ValueError as exc:
+        print(f"gitmeup: failed to parse bash commands: {exc}", file=sys.stderr)
+        print("Model output block:\n", file=sys.stderr)
+        print(bash_block, file=sys.stderr)
+        sys.exit(1)
+
     run_commands(commands, apply=args.apply)
 
     print("\nFinal git status:\n")

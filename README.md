@@ -172,6 +172,12 @@ Run the tool from the root of any git repository with uncommitted changes:
 gitmeup
 ```
 
+Check the installed CLI version:
+
+```bash
+gitmeup --version
+```
+
 The tool performs the following checks:
 
 * Verifies the current directory is a git repository.
