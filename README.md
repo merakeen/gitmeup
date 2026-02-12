@@ -175,7 +175,7 @@ gitmeup
 Check the installed CLI version:
 
 ```bash
-gitmeup --version
+gitmeup -v
 ```
 
 The tool performs the following checks:

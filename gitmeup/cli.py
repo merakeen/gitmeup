@@ -316,7 +316,7 @@ def main(argv=None):
         help="Gemini API key (default: $GEMINI_API_KEY).",
     )
     parser.add_argument(
-        "--version",
+        "-v",
         action="version",
         version=f"%(prog)s {__version__}",
         help="Show gitmeup version and exit.",
