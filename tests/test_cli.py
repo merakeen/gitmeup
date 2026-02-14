@@ -103,6 +103,17 @@ class RunCommandsValidationTests(unittest.TestCase):
         self.assertEqual(exit_ctx.exception.code, 1)
         self.assertIn("invalid Conventional Commit header", err.getvalue())
 
+    def test_run_commands_rejects_generic_scope_name(self):
+        commands = [["git", "commit", "-m", "refactor(gitmeup): improve parser validation"]]
+
+        err = io.StringIO()
+        with redirect_stderr(err):
+            with self.assertRaises(SystemExit) as exit_ctx:
+                cli.run_commands(commands, apply=False)
+
+        self.assertEqual(exit_ctx.exception.code, 1)
+        self.assertIn("scope 'gitmeup' is too generic", err.getvalue())
+
     def test_run_commands_rejects_empty_commit_header(self):
         commands = [["git", "commit", "-m", ""]]
 
@@ -113,6 +124,42 @@ class RunCommandsValidationTests(unittest.TestCase):
 
         self.assertEqual(exit_ctx.exception.code, 1)
         self.assertIn("commit header is empty", err.getvalue())
+
+    @patch("gitmeup.cli.run_git")
+    def test_run_commands_rejects_scoped_commit_with_multiple_areas(self, mock_run_git):
+        mock_run_git.side_effect = [
+            "README.md\0tests/test_cli.py\0",
+            " M README.md\0 M tests/test_cli.py\0",
+        ]
+        commands = [
+            ["git", "add", "--", "README.md", "tests/test_cli.py"],
+            ["git", "commit", "-m", "chore(tests): sync docs and tests"],
+        ]
+
+        err = io.StringIO()
+        with redirect_stderr(err):
+            with self.assertRaises(SystemExit) as exit_ctx:
+                cli.run_commands(commands, apply=False)
+
+        self.assertEqual(exit_ctx.exception.code, 1)
+        self.assertIn("spans multiple top-level areas", err.getvalue())
+
+    @patch("gitmeup.cli.run_git")
+    def test_run_commands_allows_unscoped_commit_with_multiple_areas(self, mock_run_git):
+        mock_run_git.side_effect = [
+            "README.md\0tests/test_cli.py\0",
+            " M README.md\0 M tests/test_cli.py\0",
+        ]
+        commands = [
+            ["git", "add", "--", "README.md", "tests/test_cli.py"],
+            ["git", "commit", "-m", "chore: sync docs and tests"],
+        ]
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cli.run_commands(commands, apply=False)
+
+        self.assertIn("git commit -m 'chore: sync docs and tests'", out.getvalue())
 
     @patch("gitmeup.cli.run_git")
     def test_run_commands_fails_for_ambiguous_case_corrections(self, mock_run_git):

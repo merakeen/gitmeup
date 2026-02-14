@@ -31,7 +31,7 @@ CONVENTIONAL_TYPES = (
     "revert",
 )
 CONVENTIONAL_HEADER_RE = re.compile(
-    rf"^({'|'.join(CONVENTIONAL_TYPES)})(\([^)]+\))?(!)?: .+"
+    rf"^(?P<type>{'|'.join(CONVENTIONAL_TYPES)})(\((?P<scope>[^)]+)\))?(?P<breaking>!)?: (?P<description>.+)"
 )
 
 SYSTEM_PROMPT = dedent(
@@ -55,6 +55,8 @@ RULES FOR DECIDING COMMITS:
 - Never invent files; operate only on files that appear in the provided git status or diff.
 - If staged vs unstaged is unclear, assume everything is unstaged and must be added.
 - If the changes are heterogeneous, split them into multiple commits and multiple batches.
+- Scope must reflect the changed area from file paths (module/component/docs/tests/etc), not the repository or package name.
+- When a batch spans multiple top-level areas, prefer no scope and split into smaller commits when possible.
 
 STRICT PATH QUOTING (MANDATORY):
 You output git commands that the user will paste directly in a POSIX shell.
@@ -81,6 +83,7 @@ OUTPUT FORMAT (VERY IMPORTANT):
 STYLE OF COMMIT MESSAGES:
 - Descriptions are detailed, imperative, and specific.
 - Commit header must strictly follow: type(scope): description (scope optional).
+- Avoid generic scopes such as the repository/package name (for this project: "gitmeup").
 """
 )
 
@@ -423,8 +426,59 @@ def _extract_commit_message_headers(cmd):
     return headers
 
 
-def validate_commit_messages(commands):
+def _project_generic_scopes():
+    scopes = {Path.cwd().name.casefold(), "gitmeup"}
+    pyproject = Path.cwd() / "pyproject.toml"
+    if not pyproject.exists():
+        return scopes
+
+    in_project_section = False
+    try:
+        for raw_line in pyproject.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if line.startswith("[") and line.endswith("]"):
+                in_project_section = line == "[project]"
+                continue
+            if not in_project_section or not line.startswith("name"):
+                continue
+            match = re.match(r'name\s*=\s*["\']([^"\']+)["\']', line)
+            if match:
+                scopes.add(match.group(1).strip().casefold())
+            break
+    except OSError:
+        # Validation can continue even if pyproject cannot be read.
+        pass
+    return scopes
+
+
+def _is_commit_command(cmd):
+    return len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "commit"
+
+
+def _iter_commit_batches(commands):
+    batch_paths = []
     for command_index, cmd in enumerate(commands, start=1):
+        for path_index in _path_indices_for_git_path_command(cmd):
+            batch_paths.append(cmd[path_index])
+
+        if _is_commit_command(cmd):
+            yield command_index, cmd, list(batch_paths)
+            batch_paths = []
+
+
+def _batch_top_level_areas(paths):
+    areas = set()
+    for path in paths:
+        normalized = path[2:] if path.startswith("./") else path
+        if not normalized or normalized == ".":
+            continue
+        areas.add(normalized.split("/", 1)[0].casefold())
+    return sorted(areas)
+
+
+def validate_commit_messages(commands):
+    generic_scopes = _project_generic_scopes()
+    for command_index, cmd, batch_paths in _iter_commit_batches(commands):
         headers = _extract_commit_message_headers(cmd)
         if not headers:
             continue
@@ -432,10 +486,30 @@ def validate_commit_messages(commands):
         header = headers[0]
         if not header:
             raise ValueError(f"Command {command_index}: commit header is empty.")
-        if not CONVENTIONAL_HEADER_RE.match(header):
+
+        header_match = CONVENTIONAL_HEADER_RE.match(header)
+        if not header_match:
             raise ValueError(
                 f"Command {command_index}: invalid Conventional Commit header {header!r}. "
                 "Expected: <type>(scope): <description> (scope optional)."
+            )
+
+        scope = header_match.group("scope")
+        if not scope:
+            continue
+
+        scope_key = scope.strip().casefold()
+        if scope_key in generic_scopes:
+            raise ValueError(
+                f"Command {command_index}: scope {scope!r} is too generic. "
+                "Use a path-derived area scope or omit scope."
+            )
+
+        areas = _batch_top_level_areas(batch_paths)
+        if len(areas) > 1:
+            raise ValueError(
+                f"Command {command_index}: scoped commit spans multiple top-level areas "
+                f"({', '.join(areas)}). Split the batch or omit scope."
             )
 
 
