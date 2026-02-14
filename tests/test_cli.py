@@ -72,5 +72,64 @@ class MainErrorHandlingTests(unittest.TestCase):
         self.assertRegex(out.getvalue().strip(), r"^gitmeup \d+\.\d+\.\d+$")
 
 
+class RunCommandsValidationTests(unittest.TestCase):
+    @patch("gitmeup.cli.run_git")
+    def test_run_commands_corrects_case_mismatched_add_paths(self, mock_run_git):
+        mock_run_git.side_effect = [
+            "components/WebGLDisabledPopup.tsx\0",
+            " M components/WebGLDisabledPopup.tsx\0",
+        ]
+        commands = [
+            ["git", "add", "--", "Components/WebGLDisabledPopup.tsx"],
+            ["git", "commit", "-m", "fix(ui): update popup behavior"],
+        ]
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cli.run_commands(commands, apply=False)
+
+        output = out.getvalue()
+        self.assertIn("Adjusted path casing", output)
+        self.assertIn("git add -- components/WebGLDisabledPopup.tsx", output)
+
+    def test_run_commands_rejects_non_conventional_commit_headers(self):
+        commands = [["git", "commit", "-m", "update parser behavior"]]
+
+        err = io.StringIO()
+        with redirect_stderr(err):
+            with self.assertRaises(SystemExit) as exit_ctx:
+                cli.run_commands(commands, apply=False)
+
+        self.assertEqual(exit_ctx.exception.code, 1)
+        self.assertIn("invalid Conventional Commit header", err.getvalue())
+
+    def test_run_commands_rejects_empty_commit_header(self):
+        commands = [["git", "commit", "-m", ""]]
+
+        err = io.StringIO()
+        with redirect_stderr(err):
+            with self.assertRaises(SystemExit) as exit_ctx:
+                cli.run_commands(commands, apply=False)
+
+        self.assertEqual(exit_ctx.exception.code, 1)
+        self.assertIn("commit header is empty", err.getvalue())
+
+    @patch("gitmeup.cli.run_git")
+    def test_run_commands_fails_for_ambiguous_case_corrections(self, mock_run_git):
+        mock_run_git.side_effect = [
+            "components/Popup.tsx\0components/popup.tsx\0",
+            "",
+        ]
+        commands = [["git", "add", "--", "components/POPUP.tsx"]]
+
+        err = io.StringIO()
+        with redirect_stderr(err):
+            with self.assertRaises(SystemExit) as exit_ctx:
+                cli.run_commands(commands, apply=False)
+
+        self.assertEqual(exit_ctx.exception.code, 1)
+        self.assertIn("Ambiguous case-insensitive match", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

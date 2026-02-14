@@ -1,6 +1,6 @@
 [project]
 name = "gitmeup"
-version = "1.0.4"
+version = "1.0.5"
 description = "LLM-assisted conventional commits generator for git repositories. Automatically generates git add and commit lines based on git diff and status."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,9 +19,9 @@ classifiers = [
 gitmeup = "gitmeup.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/ikramagix/gitmeup"
-Source = "https://github.com/ikramagix/gitmeup"
-Issues = "https://github.com/ikramagix/gitmeup/issues"
+Homepage = "https://github.com/merakeen/gitmeup"
+Source = "https://github.com/merakeen/gitmeup"
+Issues = "https://github.com/merakeen/gitmeup/issues"
 
 [build-system]
 requires = ["setuptools>=61", "wheel"]

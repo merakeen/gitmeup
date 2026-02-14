@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -17,6 +18,21 @@ MAX_DIFF_CHARS = 40000
 # Long-lived, general-purpose text model for this CLI workflow.
 # Live-audio and image-specialized models are intentionally not defaulted here.
 DEFAULT_MODEL = "gemini-2.5-flash-lite"
+CONVENTIONAL_TYPES = (
+    "feat",
+    "fix",
+    "chore",
+    "docs",
+    "style",
+    "refactor",
+    "perf",
+    "test",
+    "ci",
+    "revert",
+)
+CONVENTIONAL_HEADER_RE = re.compile(
+    rf"^({'|'.join(CONVENTIONAL_TYPES)})(\([^)]+\))?(!)?: .+"
+)
 
 SYSTEM_PROMPT = dedent(
     """
@@ -64,6 +80,7 @@ OUTPUT FORMAT (VERY IMPORTANT):
 
 STYLE OF COMMIT MESSAGES:
 - Descriptions are detailed, imperative, and specific.
+- Commit header must strictly follow: type(scope): description (scope optional).
 """
 )
 
@@ -269,7 +286,176 @@ def parse_commands(block):
     return commands
 
 
+def _parse_status_porcelain_z_paths(porcelain_z):
+    """
+    Parse `git status --porcelain -z` and return all paths present in entries.
+    Includes both source and destination for renames/copies.
+    """
+    paths = set()
+    entries = porcelain_z.split("\0")
+    index = 0
+
+    while index < len(entries):
+        entry = entries[index]
+        if not entry:
+            index += 1
+            continue
+        if len(entry) < 4:
+            index += 1
+            continue
+
+        xy = entry[:2]
+        path = entry[3:]
+        if path:
+            paths.add(path)
+
+        # In -z porcelain mode, rename/copy emits an extra NUL-delimited path.
+        if "R" in xy or "C" in xy:
+            index += 1
+            if index < len(entries):
+                other_path = entries[index]
+                if other_path:
+                    paths.add(other_path)
+
+        index += 1
+
+    return paths
+
+
+def _build_casefold_path_index():
+    """
+    Build case-insensitive path index from tracked files + current status entries.
+    """
+    tracked = run_git(["ls-files", "-z"], check=False)
+    status = run_git(["status", "--porcelain", "-z"], check=False)
+
+    paths = {p for p in tracked.split("\0") if p}
+    paths.update(_parse_status_porcelain_z_paths(status))
+
+    index = {}
+    for path in paths:
+        key = path.casefold()
+        index.setdefault(key, []).append(path)
+
+    for key in index:
+        index[key].sort()
+
+    return index
+
+
+def _resolve_path_casing(path, path_index):
+    candidates = path_index.get(path.casefold())
+    if not candidates:
+        return path
+    if path in candidates:
+        return path
+    if len(candidates) == 1:
+        return candidates[0]
+
+    options = ", ".join(shlex.quote(candidate) for candidate in candidates)
+    raise ValueError(
+        f"Ambiguous case-insensitive match for path {shlex.quote(path)}. "
+        f"Candidates: {options}"
+    )
+
+
+def _path_indices_for_git_path_command(cmd):
+    if len(cmd) < 3 or cmd[0] != "git" or cmd[1] not in {"add", "rm", "mv"}:
+        return []
+
+    if "--" in cmd:
+        sep_index = cmd.index("--")
+        return list(range(sep_index + 1, len(cmd)))
+
+    # Fallback when `--` is omitted: treat non-option args as paths.
+    return [
+        index
+        for index, arg in enumerate(cmd[2:], start=2)
+        if arg and not arg.startswith("-")
+    ]
+
+
+def normalize_command_paths(commands):
+    path_commands = [cmd for cmd in commands if _path_indices_for_git_path_command(cmd)]
+    if not path_commands:
+        return commands, []
+
+    path_index = _build_casefold_path_index()
+    normalized = []
+    corrections = []
+
+    for command_index, cmd in enumerate(commands, start=1):
+        normalized_cmd = list(cmd)
+        for path_index_in_cmd in _path_indices_for_git_path_command(normalized_cmd):
+            original_path = normalized_cmd[path_index_in_cmd]
+            resolved_path = _resolve_path_casing(original_path, path_index)
+            if resolved_path != original_path:
+                normalized_cmd[path_index_in_cmd] = resolved_path
+                corrections.append((command_index, original_path, resolved_path))
+        normalized.append(normalized_cmd)
+
+    return normalized, corrections
+
+
+def _extract_commit_message_headers(cmd):
+    if len(cmd) < 2 or cmd[0] != "git" or cmd[1] != "commit":
+        return []
+
+    messages = []
+    index = 2
+    while index < len(cmd):
+        arg = cmd[index]
+        if arg in {"-m", "--message"}:
+            if index + 1 >= len(cmd):
+                raise ValueError("git commit command uses -m/--message without a value.")
+            messages.append(cmd[index + 1])
+            index += 2
+            continue
+        index += 1
+
+    if not messages:
+        raise ValueError("git commit command must include -m/--message.")
+
+    headers = []
+    for message in messages:
+        first_line = message.splitlines()[0] if message else ""
+        headers.append(first_line.strip())
+    return headers
+
+
+def validate_commit_messages(commands):
+    for command_index, cmd in enumerate(commands, start=1):
+        headers = _extract_commit_message_headers(cmd)
+        if not headers:
+            continue
+
+        header = headers[0]
+        if not header:
+            raise ValueError(f"Command {command_index}: commit header is empty.")
+        if not CONVENTIONAL_HEADER_RE.match(header):
+            raise ValueError(
+                f"Command {command_index}: invalid Conventional Commit header {header!r}. "
+                "Expected: <type>(scope): <description> (scope optional)."
+            )
+
+
 def run_commands(commands, apply):
+    try:
+        commands, corrections = normalize_command_paths(commands)
+        validate_commit_messages(commands)
+    except ValueError as exc:
+        print(f"gitmeup: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if corrections:
+        print("Adjusted path casing to match repository paths:\n")
+        for command_index, original_path, resolved_path in corrections:
+            print(
+                f"- command {command_index}: "
+                f"{shlex.quote(original_path)} -> {shlex.quote(resolved_path)}"
+            )
+        print()
+
     print("Proposed commands:\n")
     for cmd in commands:
         print(" ".join(shlex.quote(part) for part in cmd))

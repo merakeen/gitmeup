@@ -6,7 +6,7 @@
 > It does **not** push anything, it just helps you decide *what* to commit and *how* to phrase it.
 > It is designed for strict safety: it runs in **dry-run mode by default**, never pushes to remotes, and handles complex file paths with POSIX-compliant quoting.
 
-### Navigation
+### Navigation (only on Github)
 * [What problem does it solve?](#what-problem-does-it-solve)
 * [How does it work?](#how-it-works-in-practice)
 * [Installation](#installation)
@@ -69,7 +69,7 @@ This installs the `gitmeup` CLI into your environment.
 ### From source (editable dev install)
 
 ```bash
-git clone [https://github.com/ikramagix/gitmeup](https://github.com/ikramagix/gitmeup)
+git clone [https://github.com/merakeen/gitmeup](https://github.com/merakeen/gitmeup)
 cd gitmeup
 
 python3 -m venv .venv
@@ -214,6 +214,8 @@ gitmeup --apply
 `gitmeup` will:
 
 * Print each command to stdout as it executes.
+* Validate `git commit -m` headers against Conventional Commits (`<type>(scope): <description>`, scope optional).
+* Auto-correct path casing for `git add`/`git rm`/`git mv` when a unique case-insensitive match exists in repo paths.
 * Terminate immediately upon any command failure (non-zero exit code).
 * Display the final git status upon completion:
 
@@ -254,6 +256,8 @@ gitmeup --model gemini-2.5-flash-lite
 * **No pushing**: `gitmeup` never outputs `git push` or remote commands.
 * **No invented files**: it only operates on files present in `git status` / `git diff`.
 * **Strict quoting**: paths containing spaces, brackets, unicode, etc. are double-quoted; safe paths are not over-quoted.
+* **Path casing safety**: command paths are normalized to real repo casing before execution; ambiguous matches fail with a clear error.
+* **Conventional Commit guardrails**: commit headers must follow `<type>(scope): <description>` (scope optional) before any command is executed.
 * **Atomic commits**: model is instructed to group changes into small, semantic batches (e.g. `refactor`, `docs`, `assets`), rather than one huge “misc” commit.
 
 You still review and decide when to run `--apply`.
@@ -265,10 +269,10 @@ This project is distributed under a **dual license** model.
 1.  **Individuals & personal use**: Free to use under the terms of the **MIT License**.
 2.  **Organizations & businesses**: A commercial license is required.
 
-Please contact **hello@ikramagix.com** for commercial licensing details.
+Please contact **ikrame@merakeen.com** for commercial licensing details.
 
 See [`LICENSE`](./LICENSE) for the full legal text.
 
 ## Maintainer
 
-Created and maintained by [@ikramagix](https://github.com/ikramagix).
+Created & maintained by [@ikramagix](https://github.com/ikramagix).
