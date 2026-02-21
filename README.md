@@ -203,7 +203,7 @@ git commit -m 'docs: update README with configuration details'
 Dry run: not executing commands. Re-run with --apply to execute.
 ```
 
-![gitmeup dry-run output example](./gitmeup-commot-example.svg)
+![gitmeup run output example](./gitmeup-commit-example.png)
 
 No commands are executed in this mode.
 
