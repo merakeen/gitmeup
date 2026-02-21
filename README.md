@@ -2,6 +2,8 @@
 
 `gitmeup` leverages popular LLMs to organize changes into atomic, semantic batches, and generates precise `git add` and `git commit` commands following the [Conventional Commits 1.0.0](https://www.conventionalcommits.org/) specification.
 
+![gitmeup run output example](./gitmeup-commit-example.png)
+
 
 
 > [!IMPORTANT]
@@ -203,7 +205,7 @@ git commit -m 'docs: update README with configuration details'
 Dry run: not executing commands. Re-run with --apply to execute.
 ```
 
-![gitmeup run output example](./gitmeup-commit-example.png)
+![gitmeup dry-run output example](./gitmeup-commit-example.png)
 
 No commands are executed in this mode.
 
