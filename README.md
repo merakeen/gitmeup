@@ -16,6 +16,7 @@
 * [Installation](#installation)
 * [Configuration](#configuration)
 * [Usage](#usage)
+  * [Scope to specific files](#scope-to-specific-files)
 * [Examples](#examples)
 * [Behaviour](#behaviour)
 * [License](#license)
@@ -131,11 +132,11 @@ export GITMEUP_MODEL="gemini-2.5-flash"
 
 ### 3. CLI overrides (use sparingly)
 
-The CLI accepts overrides:
+The CLI accepts overrides (both long and short forms):
 
 ```bash
-gitmeup --model gemini-2.5-pro        # override model for this run only
-gitmeup --api-key "you-can-but-should-not-add-your-key-here"     # override key (not recommended; leaks to history!)
+gitmeup --model gemini-2.5-pro        # or: gitmeup -m gemini-2.5-pro
+gitmeup --api-key "you-can-but-should-not-add-your-key-here"     # or: -k (not recommended; leaks to history!)
 ```
 
 > [!WARNING]
@@ -179,8 +180,10 @@ gitmeup
 Check the installed CLI version:
 
 ```bash
-gitmeup -v
+gitmeup -v        # or: gitmeup --version
 ```
+
+All flags accept a short form: `-a` / `--apply`, `-m` / `--model`, `-k` / `--api-key`, `-v` / `--version`.
 
 The tool performs the following checks:
 
@@ -214,7 +217,7 @@ No commands are executed in this mode.
 To execute the proposed `git add` and `git commit` commands:
 
 ```bash
-gitmeup --apply
+gitmeup --apply   # or: gitmeup -a
 ```
 
 `gitmeup` will:
@@ -236,6 +239,22 @@ Review your history with:
   git log --oneline --graph --decorate -n 10
 ```
 
+### Scope to specific files
+
+Pass one or more paths as positional arguments to restrict the entire pipeline (diff, prompt, add, commit) to those files only:
+
+```bash
+gitmeup .gitignore                        # dry-run scoped to .gitignore
+gitmeup -a .gitignore README.md           # apply scoped to two files
+gitmeup -a src/api_client.py              # commit one file only
+```
+
+When paths are given:
+
+* Other dirty files are left untouched.
+* A path with no pending changes exits with an error (catches typos and already-clean files).
+* The LLM is instructed to stay within the requested scope, and a validator rejects any `git add`/`rm`/`mv` command that references a file outside the scope.
+
 ## Examples
 
 Standard workflow using environment configuration:
@@ -254,7 +273,13 @@ git log --oneline --graph --decorate -n 10
 Override the model for a specific run:
 
 ```bash
-gitmeup --model gemini-2.5-flash-lite
+gitmeup --model gemini-2.5-flash-lite     # or: -m gemini-2.5-flash-lite
+```
+
+Commit only a subset of your changes:
+
+```bash
+gitmeup -a .gitignore pyproject.toml      # scope apply to these two files
 ```
 
 ## Behaviour

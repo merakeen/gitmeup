@@ -138,17 +138,18 @@ def ensure_repo():
         sys.exit(1)
 
 
-def collect_context():
+def collect_context(paths=None):
+    scope = list(paths) if paths else ["."]
     # Use HEAD to capture both staged and unstaged changes in the diff
-    diff_stat = run_git(["diff", "--stat", "HEAD"], check=False)
-    status = run_git(["status", "--short"], check=False)
+    diff_stat = run_git(["diff", "--stat", "HEAD", "--", *scope], check=False)
+    status = run_git(["status", "--short", "--", *scope], check=False)
 
     # Exclude patterns that bloat tokens but provide low semantic value
     diff_args = [
         "diff",
         "HEAD",
         "--",
-        ".",
+        *scope,
         # Images / Binaries
         ":(exclude)*.png",
         ":(exclude)*.jpg",
@@ -179,7 +180,7 @@ def collect_context():
     return diff_stat, status, diff
 
 
-def build_user_prompt(diff_stat, status, diff):
+def build_user_prompt(diff_stat, status, diff, paths=None):
     # Truncate diff if it's still too massive
     if len(diff) > MAX_DIFF_CHARS:
         diff = (
@@ -197,10 +198,22 @@ def build_user_prompt(diff_stat, status, diff):
         "# git diff (lockfiles & binaries excluded)",
         diff.strip() or "(no textual diff)",
         "",
+    ]
+
+    if paths:
+        quoted = " ".join(shlex.quote(p) for p in paths)
+        parts.extend([
+            "# SCOPE CONSTRAINT",
+            f"Only propose git add/rm/mv and git commit for these paths: {quoted}.",
+            "Do not stage or commit any file outside this list, even if it appears in the status.",
+            "",
+        ])
+
+    parts.extend([
         "# TASK",
         "Based on the changes above, propose git add/rm/mv and git commit commands as per the instructions.",
         "If the diff was truncated, rely on the file paths in the stat section to infer context.",
-    ]
+    ])
     return "\n".join(parts)
 
 
@@ -400,6 +413,37 @@ def normalize_command_paths(commands):
     return normalized, corrections
 
 
+def _canonical_scope_path(path):
+    return path[2:] if path.startswith("./") else path
+
+
+def validate_scope(commands, allowed_paths):
+    if not allowed_paths:
+        return
+    allowed = {_canonical_scope_path(p) for p in allowed_paths}
+    for command_index, cmd in enumerate(commands, start=1):
+        is_path_cmd = (
+            len(cmd) >= 2 and cmd[0] == "git" and cmd[1] in {"add", "rm", "mv"}
+        )
+        if not is_path_cmd:
+            continue
+
+        path_indices = _path_indices_for_git_path_command(cmd)
+        if not path_indices:
+            raise ValueError(
+                f"Command {command_index}: `git {cmd[1]}` must use explicit paths "
+                f"within the requested scope."
+            )
+
+        for path_index in path_indices:
+            raw = cmd[path_index]
+            if _canonical_scope_path(raw) not in allowed:
+                raise ValueError(
+                    f"Command {command_index}: path {shlex.quote(raw)} is outside "
+                    f"the requested scope."
+                )
+
+
 def _extract_commit_message_headers(cmd):
     if len(cmd) < 2 or cmd[0] != "git" or cmd[1] != "commit":
         return []
@@ -513,9 +557,10 @@ def validate_commit_messages(commands):
             )
 
 
-def run_commands(commands, apply):
+def run_commands(commands, apply, allowed_paths=None):
     try:
         commands, corrections = normalize_command_paths(commands)
+        validate_scope(commands, allowed_paths)
         validate_commit_messages(commands)
     except ValueError as exc:
         print(f"gitmeup: {exc}", file=sys.stderr)
@@ -559,27 +604,33 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="gitmeup",
         description="Generate Conventional Commits from current git changes using Gemini.",
+        allow_abbrev=False,
     )
     parser.add_argument(
-        "--model",
+        "-m", "--model",
         default=os.environ.get("GITMEUP_MODEL", DEFAULT_MODEL),
         help=f"Gemini model name (default: {DEFAULT_MODEL} or $GITMEUP_MODEL).",
     )
     parser.add_argument(
-        "--apply",
+        "-a", "--apply",
         action="store_true",
         help="Execute generated git commands. Without this flag, just print them.",
     )
     parser.add_argument(
-        "--api-key",
+        "-k", "--api-key",
         default=os.environ.get("GEMINI_API_KEY"),
         help="Gemini API key (default: $GEMINI_API_KEY).",
     )
     parser.add_argument(
-        "-v",
+        "-v", "--version",
         action="version",
         version=f"%(prog)s {__version__}",
         help="Show gitmeup version and exit.",
+    )
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        help="Optional paths to scope add/commit. Defaults to the full working tree.",
     )
 
     args = parser.parse_args(argv)
@@ -593,13 +644,36 @@ def main(argv=None):
 
     ensure_repo()
 
-    porcelain = run_git(["status", "--porcelain"], check=False)
-    if porcelain.strip() == "":
-        print("Working tree clean. Nothing to commit.")
-        sys.exit(0)
+    scope = args.paths or []
+    allowed_paths = None
 
-    diff_stat, status, diff = collect_context()
-    prompt = build_user_prompt(diff_stat, status, diff)
+    if scope:
+        for path in scope:
+            per_path_porcelain = run_git(
+                ["status", "--porcelain", "--", path], check=False
+            )
+            if per_path_porcelain.strip() == "":
+                print(
+                    f"gitmeup: path {shlex.quote(path)} has no changes.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+        tracked = run_git(["ls-files", "--", *scope], check=False).splitlines()
+        porcelain_paths = _parse_status_porcelain_z_paths(
+            run_git(
+                ["status", "--porcelain", "-z", "--", *scope], check=False
+            )
+        )
+        allowed_paths = {p for p in tracked if p} | porcelain_paths
+    else:
+        porcelain = run_git(["status", "--porcelain"], check=False)
+        if porcelain.strip() == "":
+            print("Working tree clean. Nothing to commit.")
+            sys.exit(0)
+
+    diff_stat, status, diff = collect_context(scope)
+    prompt = build_user_prompt(diff_stat, status, diff, paths=scope)
 
     # Calculate rough token usage for user awareness (optional, but helpful for debugging)
     # print(f"DEBUG: Prompt size is approx {len(prompt)} characters.")
@@ -624,7 +698,7 @@ def main(argv=None):
         print(bash_block, file=sys.stderr)
         sys.exit(1)
 
-    run_commands(commands, apply=args.apply)
+    run_commands(commands, apply=args.apply, allowed_paths=allowed_paths)
 
     print("\nFinal git status:\n")
     print(run_git(["status", "-sb"], check=False))
